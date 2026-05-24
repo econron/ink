@@ -23,18 +23,18 @@ func main() {
 						Action: func(ctx context.Context, cmd *cli.Command) error {
 							err := handler.Ls(ctx, cmd)
 							if err != nil {
-								fmt.Printf("err: %#v", err)
+								printError(err)
 							}
 							return nil
 						},
 					},
 					{
-						Name:  "render",
-						Usage: "render the markdown on browser",
+						Name:  "view",
+						Usage: "view the markdown on browser",
 						Action: func(ctx context.Context, cmd *cli.Command) error {
-							err := handler.Render(ctx, cmd)
+							err := handler.View(ctx, cmd)
 							if err != nil {
-								fmt.Printf("err: %#v", err)
+								printError(err)
 							}
 							return nil
 						},
@@ -47,4 +47,18 @@ func main() {
 	if err := cmd.Run(context.Background(), os.Args); err != nil {
 		log.Fatal(err)
 	}
+}
+
+func printError(err error) {
+	if err == nil {
+		return
+	}
+	fmt.Fprint(os.Stderr, formatError(err))
+}
+
+func formatError(err error) string {
+	if err == nil {
+		return ""
+	}
+	return fmt.Sprintf("ink: %v\n", err)
 }

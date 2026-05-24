@@ -3,43 +3,57 @@ package handler
 import (
 	"context"
 	"fmt"
-	"path"
+	"os"
+	"path/filepath"
+
 	"github.com/econron/browser"
 	"github.com/urfave/cli/v3"
 )
 
-// 一時的なもの
-// const URL1 = "index.html"
-
-func Render(ctx context.Context, cmd *cli.Command) error {
+func View(ctx context.Context, cmd *cli.Command) error {
 	// 対象ファイル名を取得してくる
-	if cmd.Args().First() == "" {
-		fmt.Println("you need filename.")
-		return nil
+	mdName := ""
+	if cmd != nil && cmd.Args() != nil {
+		mdName = cmd.Args().First()
 	}
-	mdName := cmd.Args().First()
-	mdPath := path.Join(DOWNLOADPATH, mdName)
+	if mdName == "" {
+		return fmt.Errorf("you need filename")
+	}
+	mdPath := filepath.Join(DOWNLOADPATH, mdName)
+
 	// 対象ファイルをmarkdown -> html変換した新規ファイルを作成する
 	htmlPath, err := parseMdToHTML(mdPath)
 	if err != nil {
-		fmt.Printf("an error occured while parsing Md to html. err: #%v", err)
-		return nil
+		return fmt.Errorf("an error occurred while parsing markdown to html: %w", err)
 	}
+
 	// 作成したhtmlファイルをブラウザでレンダーする
-	if err := browser.OpenURL(htmlPath); err != nil {
-		fmt.Printf("an error occured while opening file in browser. err: %#v", err)
+	if err := browser.OpenFile(htmlPath); err != nil {
+		return fmt.Errorf("an error occurred while opening file in browser: %w", err)
 	}
 	return nil
 }
 
 func parseMdToHTML(mdPath string) (string, error) {
-	fmt.Println(mdPath)
-	// htmlPath := URL1
+	raw, err := os.ReadFile(mdPath)
+	if err != nil {
+		return "", fmt.Errorf("read markdown file: %w", err)
+	}
 
-	// mdPathのファイルの中身を読み込む
-	// WIP
-	// 
+	nodes := parseBlocks(string(raw))
+	htmlContent := renderHTML(nodes)
 
-	// return htmlPath, nil
-	return mdPath, nil
+	htmlFile, err := os.CreateTemp("", "ink-*.html")
+	if err != nil {
+		return "", fmt.Errorf("create temporary html file: %w", err)
+	}
+	if _, err := htmlFile.WriteString(htmlContent); err != nil {
+		htmlFile.Close()
+		return "", fmt.Errorf("write temporary html file: %w", err)
+	}
+	if err := htmlFile.Close(); err != nil {
+		return "", fmt.Errorf("close temporary html file: %w", err)
+	}
+
+	return htmlFile.Name(), nil
 }

@@ -1,4 +1,4 @@
-.PHONY: build ink render
+.PHONY: build ink view
 
 build:
 	go build cmd/main.go
@@ -6,8 +6,8 @@ build:
 ink:
 	./main ink ls
 
-render:
-	./main ink render test.md
+view:
+	./main ink view test.md
 
 nofile:
-	./main ink render
+	./main ink view

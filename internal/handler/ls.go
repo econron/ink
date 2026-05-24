@@ -3,13 +3,13 @@ package handler
 import (
 	"context"
 	"fmt"
+	"path/filepath"
+
 	"github.com/urfave/cli/v3"
-	"io/fs"
 	"os"
-	"path"
 )
 
-const DOWNLOADPATH = "/Users/hoge/Downloads"
+const DOWNLOADPATH = "/Users/okuyamaaron/Downloads"
 
 func Ls(ctx context.Context, cmd *cli.Command) error {
 	files, err := listFiles(DOWNLOADPATH)
@@ -25,14 +25,16 @@ func Ls(ctx context.Context, cmd *cli.Command) error {
 func listFiles(dir string) ([]string, error) {
 	var files []string
 
-	root := os.DirFS(dir)
-	mdFiles, err := fs.Glob(root, "*.md")
+	entries, err := os.ReadDir(dir)
 	if err != nil {
-		return files, fmt.Errorf("An error occured while listing files: %#v", err)
+		return files, fmt.Errorf("list markdown files: %w", err)
 	}
 
-	for _, file := range mdFiles {
-		files = append(files, path.Join(dir, file))
+	for _, entry := range entries {
+		if entry.IsDir() || filepath.Ext(entry.Name()) != ".md" {
+			continue
+		}
+		files = append(files, filepath.Join(dir, entry.Name()))
 	}
 	return files, nil
 }
