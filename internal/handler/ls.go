@@ -9,7 +9,7 @@ import (
 	"path"
 )
 
-const DOWNLOADPATH = "/Users/okuyamaaron/Downloads"
+const DOWNLOADPATH = "/Users/hoge/Downloads"
 
 func Ls(ctx context.Context, cmd *cli.Command) error {
 	files, err := listFiles(DOWNLOADPATH)
