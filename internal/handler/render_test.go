@@ -142,7 +142,7 @@ func TestViewUsesConfiguredLibrary(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(library, "note.md"), []byte("# Configured\n"), 0644); err != nil {
 		t.Fatalf("write markdown: %v", err)
 	}
-	if _, err := config.Set(config.KeyLibrary, library); err != nil {
+	if _, err := config.Set(config.KeyLibrary, []string{library}); err != nil {
 		t.Fatalf("set library: %v", err)
 	}
 
@@ -173,6 +173,109 @@ func TestViewUsesConfiguredLibrary(t *testing.T) {
 	}
 }
 
+func TestViewFindsMarkdownFromMultipleLibraries(t *testing.T) {
+	home := setupHome(t)
+	firstLibrary := filepath.Join(home, "first")
+	secondLibrary := filepath.Join(home, "second")
+	for _, library := range []string{firstLibrary, secondLibrary} {
+		if err := os.Mkdir(library, 0755); err != nil {
+			t.Fatalf("mkdir library %s: %v", library, err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(secondLibrary, "note.md"), []byte("# Second Library\n"), 0644); err != nil {
+		t.Fatalf("write markdown: %v", err)
+	}
+	if _, err := config.Set(config.KeyLibrary, []string{firstLibrary, secondLibrary}); err != nil {
+		t.Fatalf("set library: %v", err)
+	}
+
+	oldOpenFile := openFile
+	t.Cleanup(func() {
+		openFile = oldOpenFile
+	})
+
+	var opened string
+	openFile = func(path string) error {
+		opened = path
+		return nil
+	}
+
+	if err := viewMarkdown("note.md"); err != nil {
+		t.Fatalf("viewMarkdown() error = %v", err)
+	}
+
+	body, err := os.ReadFile(opened)
+	if err != nil {
+		t.Fatalf("read generated html: %v", err)
+	}
+	if !strings.Contains(string(body), "<h1>Second Library</h1>") {
+		t.Fatalf("generated html = %q, want second library content", string(body))
+	}
+}
+
+func TestViewDuplicateMarkdownReturnsError(t *testing.T) {
+	home := setupHome(t)
+	firstLibrary := filepath.Join(home, "first")
+	secondLibrary := filepath.Join(home, "second")
+	for _, library := range []string{firstLibrary, secondLibrary} {
+		if err := os.Mkdir(library, 0755); err != nil {
+			t.Fatalf("mkdir library %s: %v", library, err)
+		}
+		if err := os.WriteFile(filepath.Join(library, "note.md"), []byte("# Duplicate\n"), 0644); err != nil {
+			t.Fatalf("write markdown: %v", err)
+		}
+	}
+	if _, err := config.Set(config.KeyLibrary, []string{firstLibrary, secondLibrary}); err != nil {
+		t.Fatalf("set library: %v", err)
+	}
+
+	err := viewMarkdown("note.md")
+	if err == nil {
+		t.Fatal("viewMarkdown() error = nil, want error")
+	}
+	if !strings.Contains(err.Error(), `multiple files matched "note.md"; run one of:`) {
+		t.Fatalf("viewMarkdown() error = %q, want multiple match error", err.Error())
+	}
+	for _, library := range []string{firstLibrary, secondLibrary} {
+		want := "ink view " + filepath.Join(library, "note.md")
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("viewMarkdown() error = %q, want recommended command %q", err.Error(), want)
+		}
+	}
+}
+
+func TestViewAcceptsAbsoluteMarkdownPath(t *testing.T) {
+	setupHome(t)
+	dir := t.TempDir()
+	mdPath := filepath.Join(dir, "absolute.md")
+	if err := os.WriteFile(mdPath, []byte("# Absolute\n"), 0644); err != nil {
+		t.Fatalf("write markdown: %v", err)
+	}
+
+	oldOpenFile := openFile
+	t.Cleanup(func() {
+		openFile = oldOpenFile
+	})
+
+	var opened string
+	openFile = func(path string) error {
+		opened = path
+		return nil
+	}
+
+	if err := viewMarkdown(mdPath); err != nil {
+		t.Fatalf("viewMarkdown() error = %v", err)
+	}
+
+	body, err := os.ReadFile(opened)
+	if err != nil {
+		t.Fatalf("read generated html: %v", err)
+	}
+	if !strings.Contains(string(body), "<h1>Absolute</h1>") {
+		t.Fatalf("generated html = %q, want absolute path content", string(body))
+	}
+}
+
 func TestViewCleansOldPreviewCache(t *testing.T) {
 	home := setupHome(t)
 	library := filepath.Join(home, "library")
@@ -182,7 +285,7 @@ func TestViewCleansOldPreviewCache(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(library, "note.md"), []byte("# Current\n"), 0644); err != nil {
 		t.Fatalf("write markdown: %v", err)
 	}
-	if _, err := config.Set(config.KeyLibrary, library); err != nil {
+	if _, err := config.Set(config.KeyLibrary, []string{library}); err != nil {
 		t.Fatalf("set library: %v", err)
 	}
 
@@ -263,16 +366,22 @@ func TestListFilesReturnsMarkdownFilesOnly(t *testing.T) {
 
 func TestLsUsesConfiguredLibrary(t *testing.T) {
 	home := setupHome(t)
-	library := filepath.Join(home, "library")
-	if err := os.Mkdir(library, 0755); err != nil {
-		t.Fatalf("mkdir library: %v", err)
+	firstLibrary := filepath.Join(home, "first")
+	secondLibrary := filepath.Join(home, "second")
+	for _, library := range []string{firstLibrary, secondLibrary} {
+		if err := os.Mkdir(library, 0755); err != nil {
+			t.Fatalf("mkdir library %s: %v", library, err)
+		}
 	}
 	for _, name := range []string{"b.md", "a.md", "notes.txt"} {
-		if err := os.WriteFile(filepath.Join(library, name), []byte(name), 0644); err != nil {
+		if err := os.WriteFile(filepath.Join(firstLibrary, name), []byte(name), 0644); err != nil {
 			t.Fatalf("write fixture %s: %v", name, err)
 		}
 	}
-	if _, err := config.Set(config.KeyLibrary, library); err != nil {
+	if err := os.WriteFile(filepath.Join(secondLibrary, "c.md"), []byte("c"), 0644); err != nil {
+		t.Fatalf("write second fixture: %v", err)
+	}
+	if _, err := config.Set(config.KeyLibrary, []string{firstLibrary, secondLibrary}); err != nil {
 		t.Fatalf("set library: %v", err)
 	}
 
@@ -282,7 +391,9 @@ func TestLsUsesConfiguredLibrary(t *testing.T) {
 		t.Fatalf("Ls() error = %v", err)
 	}
 
-	want := filepath.Join(library, "a.md") + "\n" + filepath.Join(library, "b.md") + "\n"
+	want := filepath.Join(firstLibrary, "a.md") + "\n" +
+		filepath.Join(firstLibrary, "b.md") + "\n" +
+		filepath.Join(secondLibrary, "c.md") + "\n"
 	if out.String() != want {
 		t.Fatalf("Ls() output = %q, want %q", out.String(), want)
 	}

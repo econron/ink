@@ -4,11 +4,14 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"ink/internal/config"
 	"ink/internal/markdown"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/econron/browser"
@@ -33,14 +36,13 @@ func viewMarkdown(mdName string) error {
 		return fmt.Errorf("you need filename")
 	}
 
-	library, err := config.Library()
-	if err != nil {
-		return fmt.Errorf("get library config: %w", err)
-	}
-	mdPath := filepath.Join(library, mdName)
-
 	if err := cleanupPreviewCache(time.Now()); err != nil {
 		return fmt.Errorf("clean preview cache: %w", err)
+	}
+
+	mdPath, err := resolveMarkdownPath(mdName)
+	if err != nil {
+		return err
 	}
 
 	// 対象ファイルをmarkdown -> html変換した新規ファイルを作成する
@@ -54,6 +56,54 @@ func viewMarkdown(mdName string) error {
 		return fmt.Errorf("an error occurred while opening file in browser: %w", err)
 	}
 	return nil
+}
+
+func resolveMarkdownPath(mdName string) (string, error) {
+	if filepath.IsAbs(mdName) {
+		return filepath.Clean(mdName), nil
+	}
+
+	libraries, err := config.Library()
+	if err != nil {
+		return "", fmt.Errorf("get library config: %w", err)
+	}
+
+	matches := make([]string, 0)
+	for _, library := range libraries {
+		candidate := filepath.Join(library, mdName)
+		info, err := os.Stat(candidate)
+		if os.IsNotExist(err) {
+			continue
+		}
+		if err != nil {
+			return "", fmt.Errorf("find markdown file: %w", err)
+		}
+		if info.IsDir() {
+			continue
+		}
+		matches = append(matches, candidate)
+	}
+
+	switch len(matches) {
+	case 0:
+		return "", fmt.Errorf("markdown file not found: %s", mdName)
+	case 1:
+		return matches[0], nil
+	default:
+		return "", multipleMarkdownMatchesError(mdName, matches)
+	}
+}
+
+func multipleMarkdownMatchesError(mdName string, matches []string) error {
+	var b strings.Builder
+	b.WriteString("multiple files matched ")
+	b.WriteString(strconv.Quote(mdName))
+	b.WriteString("; run one of:")
+	for _, match := range matches {
+		b.WriteString("\nink view ")
+		b.WriteString(match)
+	}
+	return errors.New(b.String())
 }
 
 func parseMdToHTML(mdPath string) (string, error) {

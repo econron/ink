@@ -12,16 +12,44 @@ import (
 
 func ConfigSet(ctx context.Context, cmd *cli.Command) error {
 	args := commandArgs(cmd)
-	if len(args) != 2 {
-		return fmt.Errorf("usage: ink config set <key> <value>")
+	if len(args) < 2 {
+		return fmt.Errorf("usage: ink config set <key> <value> [value ...]")
 	}
 
-	value, err := config.Set(args[0], args[1])
+	values, err := config.Set(args[0], args[1:])
 	if err != nil {
 		return err
 	}
 
-	return writeConfigValue(cmd, args[0], value)
+	return writeConfigValues(cmd, args[0], values)
+}
+
+func ConfigAdd(ctx context.Context, cmd *cli.Command) error {
+	args := commandArgs(cmd)
+	if len(args) != 2 {
+		return fmt.Errorf("usage: ink config add <key> <value>")
+	}
+
+	values, err := config.Add(args[0], args[1])
+	if err != nil {
+		return err
+	}
+
+	return writeConfigValues(cmd, args[0], values)
+}
+
+func ConfigRemove(ctx context.Context, cmd *cli.Command) error {
+	args := commandArgs(cmd)
+	if len(args) != 2 {
+		return fmt.Errorf("usage: ink config remove <key> <value>")
+	}
+
+	values, err := config.Remove(args[0], args[1])
+	if err != nil {
+		return err
+	}
+
+	return writeConfigValues(cmd, args[0], values)
 }
 
 func ConfigGet(ctx context.Context, cmd *cli.Command) error {
@@ -30,12 +58,12 @@ func ConfigGet(ctx context.Context, cmd *cli.Command) error {
 		return fmt.Errorf("usage: ink config get <key>")
 	}
 
-	value, err := config.Get(args[0])
+	values, err := config.Get(args[0])
 	if err != nil {
 		return err
 	}
 
-	return writeLine(cmd, value)
+	return writeLines(cmd, values)
 }
 
 func ConfigList(ctx context.Context, cmd *cli.Command) error {
@@ -49,7 +77,7 @@ func ConfigList(ctx context.Context, cmd *cli.Command) error {
 		return err
 	}
 
-	return writeConfigValue(cmd, config.KeyLibrary, cfg.Library)
+	return writeConfigValues(cmd, config.KeyLibrary, cfg.Library)
 }
 
 func commandArgs(cmd *cli.Command) []string {
@@ -77,12 +105,29 @@ func commandWriter(cmd *cli.Command) io.Writer {
 	return os.Stdout
 }
 
-func writeConfigValue(cmd *cli.Command, key, value string) error {
-	_, err := fmt.Fprintf(commandWriter(cmd), "%s: %s\n", key, value)
-	return err
-}
-
 func writeLine(cmd *cli.Command, value string) error {
 	_, err := fmt.Fprintln(commandWriter(cmd), value)
 	return err
+}
+
+func writeLines(cmd *cli.Command, values []string) error {
+	for _, value := range values {
+		if err := writeLine(cmd, value); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func writeConfigValues(cmd *cli.Command, key string, values []string) error {
+	writer := commandWriter(cmd)
+	if _, err := fmt.Fprintf(writer, "%s:\n", key); err != nil {
+		return err
+	}
+	for _, value := range values {
+		if _, err := fmt.Fprintf(writer, "  - %s\n", value); err != nil {
+			return err
+		}
+	}
+	return nil
 }

@@ -12,7 +12,7 @@ import (
 const KeyLibrary = "library"
 
 type Config struct {
-	Library string `json:"library"`
+	Library []string `json:"library"`
 }
 
 func Path() (string, error) {
@@ -53,8 +53,8 @@ func Load() (Config, error) {
 		return Config{}, fmt.Errorf("read config: %w", err)
 	}
 
-	var cfg Config
-	if err := json.Unmarshal(raw, &cfg); err != nil {
+	cfg, err := decodeConfig(raw)
+	if err != nil {
 		return Config{}, fmt.Errorf("parse config %s: %w", configPath, err)
 	}
 	return normalize(cfg)
@@ -86,26 +86,44 @@ func Save(cfg Config) error {
 	return nil
 }
 
-func Set(key, value string) (string, error) {
+func Set(key string, values []string) ([]string, error) {
 	switch key {
 	case KeyLibrary:
-		return setLibrary(value)
+		return setLibrary(values)
 	default:
-		return "", unknownKeyError(key)
+		return nil, unknownKeyError(key)
 	}
 }
 
-func Get(key string) (string, error) {
+func Add(key, value string) ([]string, error) {
+	switch key {
+	case KeyLibrary:
+		return addLibrary(value)
+	default:
+		return nil, unknownKeyError(key)
+	}
+}
+
+func Remove(key, value string) ([]string, error) {
+	switch key {
+	case KeyLibrary:
+		return removeLibrary(value)
+	default:
+		return nil, unknownKeyError(key)
+	}
+}
+
+func Get(key string) ([]string, error) {
 	cfg, err := Load()
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
 	switch key {
 	case KeyLibrary:
 		return cfg.Library, nil
 	default:
-		return "", unknownKeyError(key)
+		return nil, unknownKeyError(key)
 	}
 }
 
@@ -113,7 +131,7 @@ func List() (Config, error) {
 	return Load()
 }
 
-func Library() (string, error) {
+func Library() ([]string, error) {
 	return Get(KeyLibrary)
 }
 
@@ -144,24 +162,73 @@ func ResolvePath(path string) (string, error) {
 	return filepath.Clean(absolute), nil
 }
 
-func setLibrary(value string) (string, error) {
-	library, err := ResolvePath(value)
+func setLibrary(values []string) ([]string, error) {
+	libraries, err := resolveAndValidateLibraries(values)
 	if err != nil {
-		return "", err
-	}
-	if err := validateDirectory(library); err != nil {
-		return "", err
+		return nil, err
 	}
 
 	cfg, err := Load()
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-	cfg.Library = library
+	cfg.Library = libraries
 	if err := Save(cfg); err != nil {
-		return "", err
+		return nil, err
 	}
-	return library, nil
+	return libraries, nil
+}
+
+func addLibrary(value string) ([]string, error) {
+	library, err := ResolvePath(value)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateDirectory(library); err != nil {
+		return nil, err
+	}
+	cfg, err := Load()
+	if err != nil {
+		return nil, err
+	}
+	cfg.Library = appendIfMissing(cfg.Library, library)
+	if err := Save(cfg); err != nil {
+		return nil, err
+	}
+	return cfg.Library, nil
+}
+
+func removeLibrary(value string) ([]string, error) {
+	library, err := ResolvePath(value)
+	if err != nil {
+		return nil, err
+	}
+	cfg, err := Load()
+	if err != nil {
+		return nil, err
+	}
+
+	libraries := make([]string, 0, len(cfg.Library))
+	found := false
+	for _, current := range cfg.Library {
+		if current == library {
+			found = true
+			continue
+		}
+		libraries = append(libraries, current)
+	}
+	if !found {
+		return nil, fmt.Errorf("library is not configured: %s", library)
+	}
+	if len(libraries) == 0 {
+		return nil, fmt.Errorf("library must contain at least one path")
+	}
+
+	cfg.Library = libraries
+	if err := Save(cfg); err != nil {
+		return nil, err
+	}
+	return cfg.Library, nil
 }
 
 func defaultConfig() (Config, error) {
@@ -169,19 +236,88 @@ func defaultConfig() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
-	return Config{Library: library}, nil
+	return Config{Library: []string{library}}, nil
 }
 
 func normalize(cfg Config) (Config, error) {
-	if cfg.Library == "" {
+	if len(cfg.Library) == 0 {
 		return defaultConfig()
 	}
-	library, err := ResolvePath(cfg.Library)
+	library, err := resolveLibraries(cfg.Library)
 	if err != nil {
 		return Config{}, err
 	}
 	cfg.Library = library
 	return cfg, nil
+}
+
+func decodeConfig(raw []byte) (Config, error) {
+	var values struct {
+		Library json.RawMessage `json:"library"`
+	}
+	if err := json.Unmarshal(raw, &values); err != nil {
+		return Config{}, err
+	}
+	if len(values.Library) == 0 || string(values.Library) == "null" {
+		return Config{}, nil
+	}
+
+	var library string
+	if err := json.Unmarshal(values.Library, &library); err == nil {
+		return Config{Library: []string{library}}, nil
+	}
+
+	var libraries []string
+	if err := json.Unmarshal(values.Library, &libraries); err != nil {
+		return Config{}, err
+	}
+	return Config{Library: libraries}, nil
+}
+
+func resolveAndValidateLibraries(values []string) ([]string, error) {
+	if len(values) == 0 {
+		return nil, fmt.Errorf("library requires at least one path")
+	}
+
+	libraries, err := resolveLibraries(values)
+	if err != nil {
+		return nil, err
+	}
+	for _, library := range libraries {
+		if err := validateDirectory(library); err != nil {
+			return nil, err
+		}
+	}
+	return libraries, nil
+}
+
+func resolveLibraries(values []string) ([]string, error) {
+	libraries := make([]string, 0, len(values))
+	seen := make(map[string]bool, len(values))
+	for _, value := range values {
+		library, err := ResolvePath(value)
+		if err != nil {
+			return nil, err
+		}
+		if seen[library] {
+			continue
+		}
+		seen[library] = true
+		libraries = append(libraries, library)
+	}
+	if len(libraries) == 0 {
+		return nil, fmt.Errorf("library requires at least one path")
+	}
+	return libraries, nil
+}
+
+func appendIfMissing(values []string, value string) []string {
+	for _, current := range values {
+		if current == value {
+			return values
+		}
+	}
+	return append(values, value)
 }
 
 func validateDirectory(path string) error {

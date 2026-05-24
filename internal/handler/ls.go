@@ -12,15 +12,20 @@ import (
 )
 
 func Ls(ctx context.Context, cmd *cli.Command) error {
-	library, err := config.Library()
+	libraries, err := config.Library()
 	if err != nil {
 		return fmt.Errorf("get library config: %w", err)
 	}
 
-	files, err := listFiles(library)
-	if err != nil {
-		return err
+	files := make([]string, 0)
+	for _, library := range libraries {
+		libraryFiles, err := listFiles(library)
+		if err != nil {
+			return err
+		}
+		files = append(files, libraryFiles...)
 	}
+	sort.Strings(files)
 	for _, file := range files {
 		if err := writeLine(cmd, file); err != nil {
 			return err

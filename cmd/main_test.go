@@ -29,25 +29,41 @@ func TestFormatErrorNil(t *testing.T) {
 
 func TestConfigCommands(t *testing.T) {
 	home := setupHome(t)
-	library := filepath.Join(home, "Downloads")
-	if err := os.Mkdir(library, 0755); err != nil {
-		t.Fatalf("mkdir library: %v", err)
+	downloads := filepath.Join(home, "Downloads")
+	notes := filepath.Join(home, "notes")
+	archive := filepath.Join(home, "archive")
+	for _, library := range []string{downloads, notes, archive} {
+		if err := os.Mkdir(library, 0755); err != nil {
+			t.Fatalf("mkdir library %s: %v", library, err)
+		}
 	}
 
-	got := runCommand(t, "config", "set", "library", library)
-	want := "library: " + library + "\n"
+	got := runCommand(t, "config", "set", "library", downloads, notes)
+	want := "library:\n  - " + downloads + "\n  - " + notes + "\n"
 	if got != want {
 		t.Fatalf("config set output = %q, want %q", got, want)
 	}
 
+	got = runCommand(t, "config", "add", "library", archive)
+	want = "library:\n  - " + downloads + "\n  - " + notes + "\n  - " + archive + "\n"
+	if got != want {
+		t.Fatalf("config add output = %q, want %q", got, want)
+	}
+
+	got = runCommand(t, "config", "remove", "library", notes)
+	want = "library:\n  - " + downloads + "\n  - " + archive + "\n"
+	if got != want {
+		t.Fatalf("config remove output = %q, want %q", got, want)
+	}
+
 	got = runCommand(t, "config", "get", "library")
-	want = library + "\n"
+	want = downloads + "\n" + archive + "\n"
 	if got != want {
 		t.Fatalf("config get output = %q, want %q", got, want)
 	}
 
 	got = runCommand(t, "config", "list")
-	want = "library: " + library + "\n"
+	want = "library:\n  - " + downloads + "\n  - " + archive + "\n"
 	if got != want {
 		t.Fatalf("config list output = %q, want %q", got, want)
 	}

@@ -8,7 +8,9 @@ Markdown files in a local library can be listed and opened as styled HTML in a b
 ink ls
 ink view filename.md
 
-ink config set library ~/Downloads
+ink config set library ~/Downloads ~/Documents/notes
+ink config add library ~/work/docs
+ink config remove library ~/Downloads
 ink config get library
 ink config list
 ```
@@ -26,11 +28,24 @@ ink view filename.md
 ```
 
 `filename.md` is resolved relative to the configured `library` directory.
+If multiple libraries contain a file with the same name, `ink view` stops and prints recommended absolute-path commands. Run one of them to choose the file explicitly:
+
+```sh
+ink view /Users/me/Downloads/filename.md
+ink view /Users/me/Documents/notes/filename.md
+```
 
 Set the markdown library directory:
 
 ```sh
-ink config set library ~/Downloads
+ink config set library ~/Downloads ~/Documents/notes
+```
+
+Add or remove one library directory:
+
+```sh
+ink config add library ~/work/docs
+ink config remove library ~/Downloads
 ```
 
 Show one config value:
@@ -68,6 +83,17 @@ ink --help
 
 ```txt
 ~/.ink/config.json
+```
+
+The config file stores library directories as an array:
+
+```json
+{
+  "library": [
+    "/Users/me/Downloads",
+    "/Users/me/Documents/notes"
+  ]
+}
 ```
 
 Rendered HTML previews are written under:

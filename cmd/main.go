@@ -40,8 +40,20 @@ func newCommand() *cli.Command {
 					{
 						Name:      "set",
 						Usage:     "set config value",
-						ArgsUsage: "<key> <value>",
+						ArgsUsage: "<key> <value>...",
 						Action:    commandAction(handler.ConfigSet),
+					},
+					{
+						Name:      "add",
+						Usage:     "add config value",
+						ArgsUsage: "<key> <value>",
+						Action:    commandAction(handler.ConfigAdd),
+					},
+					{
+						Name:      "remove",
+						Usage:     "remove config value",
+						ArgsUsage: "<key> <value>",
+						Action:    commandAction(handler.ConfigRemove),
 					},
 					{
 						Name:      "get",
