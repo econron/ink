@@ -3,21 +3,28 @@ package handler
 import (
 	"context"
 	"fmt"
+	"ink/internal/config"
+	"os"
 	"path/filepath"
+	"sort"
 
 	"github.com/urfave/cli/v3"
-	"os"
 )
 
-const DOWNLOADPATH = "/Users/okuyamaaron/Downloads"
-
 func Ls(ctx context.Context, cmd *cli.Command) error {
-	files, err := listFiles(DOWNLOADPATH)
+	library, err := config.Library()
+	if err != nil {
+		return fmt.Errorf("get library config: %w", err)
+	}
+
+	files, err := listFiles(library)
 	if err != nil {
 		return err
 	}
 	for _, file := range files {
-		fmt.Println(file)
+		if err := writeLine(cmd, file); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -36,5 +43,6 @@ func listFiles(dir string) ([]string, error) {
 		}
 		files = append(files, filepath.Join(dir, entry.Name()))
 	}
+	sort.Strings(files)
 	return files, nil
 }

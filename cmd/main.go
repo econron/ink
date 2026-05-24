@@ -11,41 +11,61 @@ import (
 )
 
 func main() {
-	cmd := &cli.Command{
+	cmd := newCommand()
+
+	if err := cmd.Run(context.Background(), os.Args); err != nil {
+		log.Fatal(err)
+	}
+}
+
+func newCommand() *cli.Command {
+	return &cli.Command{
+		Name:  "ink",
+		Usage: "markdown previewer",
 		Commands: []*cli.Command{
 			{
-				Name:  "ink",
-				Usage: "command basic",
+				Name:   "ls",
+				Usage:  "list markdown files in library.",
+				Action: commandAction(handler.Ls),
+			},
+			{
+				Name:   "view",
+				Usage:  "view the markdown on browser",
+				Action: commandAction(handler.View),
+			},
+			{
+				Name:  "config",
+				Usage: "manage ink config",
 				Commands: []*cli.Command{
 					{
-						Name:  "ls",
-						Usage: "lists up downlods folder.",
-						Action: func(ctx context.Context, cmd *cli.Command) error {
-							err := handler.Ls(ctx, cmd)
-							if err != nil {
-								printError(err)
-							}
-							return nil
-						},
+						Name:      "set",
+						Usage:     "set config value",
+						ArgsUsage: "<key> <value>",
+						Action:    commandAction(handler.ConfigSet),
 					},
 					{
-						Name:  "view",
-						Usage: "view the markdown on browser",
-						Action: func(ctx context.Context, cmd *cli.Command) error {
-							err := handler.View(ctx, cmd)
-							if err != nil {
-								printError(err)
-							}
-							return nil
-						},
+						Name:      "get",
+						Usage:     "get config value",
+						ArgsUsage: "<key>",
+						Action:    commandAction(handler.ConfigGet),
+					},
+					{
+						Name:   "list",
+						Usage:  "list config values",
+						Action: commandAction(handler.ConfigList),
 					},
 				},
 			},
 		},
 	}
+}
 
-	if err := cmd.Run(context.Background(), os.Args); err != nil {
-		log.Fatal(err)
+func commandAction(action func(context.Context, *cli.Command) error) cli.ActionFunc {
+	return func(ctx context.Context, cmd *cli.Command) error {
+		if err := action(ctx, cmd); err != nil {
+			printError(err)
+		}
+		return nil
 	}
 }
 

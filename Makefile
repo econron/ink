@@ -1,13 +1,19 @@
-.PHONY: build ink view
+.PHONY: build ink view nofile test lint
 
 build:
-	go build cmd/main.go
+	go build -o ink ./cmd
+
+test:
+	go test ./...
+
+lint:
+	golangci-lint run
 
 ink:
-	./main ink ls
+	./ink ls
 
 view:
-	./main ink view test.md
+	./ink view test.md
 
 nofile:
-	./main ink view
+	./ink view

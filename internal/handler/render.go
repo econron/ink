@@ -2,13 +2,22 @@ package handler
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
+	"ink/internal/config"
+	"ink/internal/markdown"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/econron/browser"
 	"github.com/urfave/cli/v3"
 )
+
+var openFile = browser.OpenFile
+
+const previewCacheMaxAge = 7 * 24 * time.Hour
 
 func View(ctx context.Context, cmd *cli.Command) error {
 	// 対象ファイル名を取得してくる
@@ -16,10 +25,23 @@ func View(ctx context.Context, cmd *cli.Command) error {
 	if cmd != nil && cmd.Args() != nil {
 		mdName = cmd.Args().First()
 	}
+	return viewMarkdown(mdName)
+}
+
+func viewMarkdown(mdName string) error {
 	if mdName == "" {
 		return fmt.Errorf("you need filename")
 	}
-	mdPath := filepath.Join(DOWNLOADPATH, mdName)
+
+	library, err := config.Library()
+	if err != nil {
+		return fmt.Errorf("get library config: %w", err)
+	}
+	mdPath := filepath.Join(library, mdName)
+
+	if err := cleanupPreviewCache(time.Now()); err != nil {
+		return fmt.Errorf("clean preview cache: %w", err)
+	}
 
 	// 対象ファイルをmarkdown -> html変換した新規ファイルを作成する
 	htmlPath, err := parseMdToHTML(mdPath)
@@ -28,7 +50,7 @@ func View(ctx context.Context, cmd *cli.Command) error {
 	}
 
 	// 作成したhtmlファイルをブラウザでレンダーする
-	if err := browser.OpenFile(htmlPath); err != nil {
+	if err := openFile(htmlPath); err != nil {
 		return fmt.Errorf("an error occurred while opening file in browser: %w", err)
 	}
 	return nil
@@ -40,20 +62,100 @@ func parseMdToHTML(mdPath string) (string, error) {
 		return "", fmt.Errorf("read markdown file: %w", err)
 	}
 
-	nodes := parseBlocks(string(raw))
-	htmlContent := renderHTML(nodes)
+	htmlContent := markdown.ToHTML(string(raw))
 
-	htmlFile, err := os.CreateTemp("", "ink-*.html")
+	htmlPath, err := previewHTMLPath(mdPath)
 	if err != nil {
-		return "", fmt.Errorf("create temporary html file: %w", err)
+		return "", err
 	}
-	if _, err := htmlFile.WriteString(htmlContent); err != nil {
-		htmlFile.Close()
-		return "", fmt.Errorf("write temporary html file: %w", err)
-	}
-	if err := htmlFile.Close(); err != nil {
-		return "", fmt.Errorf("close temporary html file: %w", err)
+	if err := writeFileAtomically(htmlPath, htmlContent); err != nil {
+		return "", err
 	}
 
-	return htmlFile.Name(), nil
+	return htmlPath, nil
+}
+
+func previewHTMLPath(mdPath string) (string, error) {
+	absolutePath, err := filepath.Abs(mdPath)
+	if err != nil {
+		return "", fmt.Errorf("resolve markdown path: %w", err)
+	}
+
+	cacheDir, err := config.CachePagesDir()
+	if err != nil {
+		return "", err
+	}
+
+	hash := sha256.Sum256([]byte(filepath.Clean(absolutePath)))
+	return filepath.Join(cacheDir, hex.EncodeToString(hash[:])+".html"), nil
+}
+
+func writeFileAtomically(path, content string) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		return fmt.Errorf("create preview cache directory: %w", err)
+	}
+
+	tmpFile, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".tmp-*")
+	if err != nil {
+		return fmt.Errorf("create temporary html file: %w", err)
+	}
+	tmpPath := tmpFile.Name()
+	removeTemp := true
+	defer func() {
+		if removeTemp {
+			_ = os.Remove(tmpPath)
+		}
+	}()
+
+	if _, err := tmpFile.WriteString(content); err != nil {
+		_ = tmpFile.Close()
+		return fmt.Errorf("write temporary html file: %w", err)
+	}
+	if err := tmpFile.Chmod(0644); err != nil {
+		_ = tmpFile.Close()
+		return fmt.Errorf("chmod temporary html file: %w", err)
+	}
+	if err := tmpFile.Close(); err != nil {
+		return fmt.Errorf("close temporary html file: %w", err)
+	}
+
+	if err := os.Rename(tmpPath, path); err != nil {
+		return fmt.Errorf("move preview html into cache: %w", err)
+	}
+	removeTemp = false
+	return nil
+}
+
+func cleanupPreviewCache(now time.Time) error {
+	cacheDir, err := config.CachePagesDir()
+	if err != nil {
+		return err
+	}
+
+	entries, err := os.ReadDir(cacheDir)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("read preview cache directory: %w", err)
+	}
+
+	cutoff := now.Add(-previewCacheMaxAge)
+	for _, entry := range entries {
+		if entry.IsDir() || filepath.Ext(entry.Name()) != ".html" {
+			continue
+		}
+
+		info, err := entry.Info()
+		if err != nil {
+			return fmt.Errorf("read preview cache file info: %w", err)
+		}
+		if !info.ModTime().Before(cutoff) {
+			continue
+		}
+		if err := os.Remove(filepath.Join(cacheDir, entry.Name())); err != nil {
+			return fmt.Errorf("remove stale preview cache: %w", err)
+		}
+	}
+	return nil
 }

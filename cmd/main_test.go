@@ -1,8 +1,14 @@
 package main
 
 import (
+	"bytes"
+	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"testing"
+
+	"github.com/urfave/cli/v3"
 )
 
 func TestFormatError(t *testing.T) {
@@ -19,4 +25,58 @@ func TestFormatErrorNil(t *testing.T) {
 	if got != "" {
 		t.Fatalf("formatError(nil) = %q, want empty string", got)
 	}
+}
+
+func TestConfigCommands(t *testing.T) {
+	home := setupHome(t)
+	library := filepath.Join(home, "Downloads")
+	if err := os.Mkdir(library, 0755); err != nil {
+		t.Fatalf("mkdir library: %v", err)
+	}
+
+	got := runCommand(t, "config", "set", "library", library)
+	want := "library: " + library + "\n"
+	if got != want {
+		t.Fatalf("config set output = %q, want %q", got, want)
+	}
+
+	got = runCommand(t, "config", "get", "library")
+	want = library + "\n"
+	if got != want {
+		t.Fatalf("config get output = %q, want %q", got, want)
+	}
+
+	got = runCommand(t, "config", "list")
+	want = "library: " + library + "\n"
+	if got != want {
+		t.Fatalf("config list output = %q, want %q", got, want)
+	}
+}
+
+func runCommand(t *testing.T, args ...string) string {
+	t.Helper()
+
+	var out bytes.Buffer
+	cmd := newCommand()
+	setCommandWriter(cmd, &out)
+	if err := cmd.Run(context.Background(), append([]string{"ink"}, args...)); err != nil {
+		t.Fatalf("run command %v: %v", args, err)
+	}
+	return out.String()
+}
+
+func setCommandWriter(cmd *cli.Command, out *bytes.Buffer) {
+	cmd.Writer = out
+	for _, child := range cmd.Commands {
+		setCommandWriter(child, out)
+	}
+}
+
+func setupHome(t *testing.T) string {
+	t.Helper()
+
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	return home
 }

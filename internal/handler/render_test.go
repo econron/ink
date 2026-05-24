@@ -1,410 +1,21 @@
 package handler
 
 import (
+	"bytes"
 	"context"
+	"ink/internal/config"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/urfave/cli/v3"
 )
 
-func TestNormalizeLineBreaks(t *testing.T) {
-	got := normalizeLineBreaks("a\r\nb\rc\n")
-	want := "a\nb\nc\n"
-
-	if got != want {
-		t.Fatalf("normalizeLineBreaks() = %q, want %q", got, want)
-	}
-}
-
-func TestParseBlocksHeadingParagraphAndBlankLine(t *testing.T) {
-	got := parseBlocks("# Title\n\nhello\n## SubTitle\nworld")
-	want := []BlockNode{
-		{Kind: BlockHeading, Level: 1, Content: "Title"},
-		{Kind: BlockParagraph, Content: "hello"},
-		{Kind: BlockHeading, Level: 2, Content: "SubTitle"},
-		{Kind: BlockParagraph, Content: "world"},
-	}
-
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("parseBlocks() = %#v, want %#v", got, want)
-	}
-}
-
-func TestParseBlocksBlockquoteCodeHorizontalRuleAndTable(t *testing.T) {
-	markdown := strings.Join([]string{
-		"> quote",
-		"> second",
-		"",
-		"```go",
-		`fmt.Println("hello")`,
-		"**not strong**",
-		"```",
-		"",
-		"---",
-		"",
-		"| name | age |",
-		"|---|---|",
-		"| aron | 29 |",
-	}, "\n")
-
-	got := parseBlocks(markdown)
-	if len(got) != 4 {
-		t.Fatalf("parseBlocks() returned %d nodes, want 4: %#v", len(got), got)
-	}
-	if got[0].Kind != BlockBlockquote || got[0].Content != "quote\nsecond" {
-		t.Fatalf("blockquote node = %#v", got[0])
-	}
-	if got[1].Kind != BlockCodeBlock || got[1].Content != "fmt.Println(\"hello\")\n**not strong**" || got[1].Language != "go" {
-		t.Fatalf("code node = %#v", got[1])
-	}
-	if got[2].Kind != BlockHorizontalRule {
-		t.Fatalf("hr node = %#v", got[2])
-	}
-	wantTable := BlockNode{Kind: BlockTable, Headers: []string{"name", "age"}, Rows: [][]string{{"aron", "29"}}}
-	if !reflect.DeepEqual(got[3], wantTable) {
-		t.Fatalf("table node = %#v, want %#v", got[3], wantTable)
-	}
-}
-
-func TestCommonMarkHeadingsAndParagraphs(t *testing.T) {
-	got := renderBlocks(parseBlocks(strings.Join([]string{
-		"# Title ###",
-		"",
-		"#",
-		"",
-		"Setext",
-		"---",
-		"",
-		"hello",
-		"world",
-	}, "\n")))
-
-	for _, want := range []string{
-		"<h1>Title</h1>",
-		"<h1></h1>",
-		"<h2>Setext</h2>",
-		"<p>hello\nworld</p>",
-	} {
-		if !strings.Contains(got, want) {
-			t.Fatalf("rendered blocks do not contain %q: %q", want, got)
-		}
-	}
-}
-
-func TestCommonMarkListPatterns(t *testing.T) {
-	got := renderBlocks(parseBlocks(strings.Join([]string{
-		"3) three",
-		"4) four",
-		"",
-		"- parent",
-		"  continued",
-		"  - child",
-		"- second",
-	}, "\n")))
-
-	for _, want := range []string{
-		`<ol start="3"><li>three</li><li>four</li></ol>`,
-		"<ul><li>parent\ncontinued<ul><li>child</li></ul></li><li>second</li></ul>",
-	} {
-		if !strings.Contains(got, want) {
-			t.Fatalf("rendered list does not contain %q: %q", want, got)
-		}
-	}
-}
-
-func TestCommonMarkLooseList(t *testing.T) {
-	got := renderBlocks(parseBlocks("- a\n\n  b\n- c"))
-	want := "<ul><li><p>a</p><p>b</p></li><li><p>c</p></li></ul>"
-	if got != want {
-		t.Fatalf("rendered loose list = %q, want %q", got, want)
-	}
-}
-
-func TestCommonMarkCodeBlocks(t *testing.T) {
-	got := renderBlocks(parseBlocks(strings.Join([]string{
-		"    indented",
-		"    **literal**",
-		"",
-		"````go",
-		`fmt.Println("x")`,
-		"```",
-		"````",
-	}, "\n")))
-
-	for _, want := range []string{
-		"<pre><code>indented\n**literal**</code></pre>",
-		"<pre><code class=\"language-go\">fmt.Println(&#34;x&#34;)\n```</code></pre>",
-	} {
-		if !strings.Contains(got, want) {
-			t.Fatalf("rendered code blocks do not contain %q: %q", want, got)
-		}
-	}
-}
-
-func TestRawHTMLBlock(t *testing.T) {
-	got := renderBlocks(parseBlocks("<div>\n<strong>raw</strong>\n</div>\n\ntext"))
-	want := "<div>\n<strong>raw</strong>\n</div><p>text</p>"
-	if got != want {
-		t.Fatalf("rendered html block = %q, want %q", got, want)
-	}
-}
-
-func TestRenderInline(t *testing.T) {
-	tests := []struct {
-		name    string
-		content string
-		want    string
-	}{
-		{
-			name:    "inline code",
-			content: "`code`",
-			want:    "<code>code</code>",
-		},
-		{
-			name:    "strong and emphasis",
-			content: "**bold** and *em*",
-			want:    "<strong>bold</strong> and <em>em</em>",
-		},
-		{
-			name:    "strikethrough",
-			content: "~~gone~~",
-			want:    "<del>gone</del>",
-		},
-		{
-			name:    "link",
-			content: `[OpenAI](https://openai.com "OpenAI site")`,
-			want:    `<a href="https://openai.com" title="OpenAI site">OpenAI</a>`,
-		},
-		{
-			name:    "bare url",
-			content: `docs: https://cli.urfave.org/v3/examples/subcommands/basics/`,
-			want:    `docs: <a href="https://cli.urfave.org/v3/examples/subcommands/basics/">https://cli.urfave.org/v3/examples/subcommands/basics/</a>`,
-		},
-		{
-			name:    "angle autolink",
-			content: `<https://openai.com>`,
-			want:    `<a href="https://openai.com">https://openai.com</a>`,
-		},
-		{
-			name:    "bare url trims punctuation",
-			content: `see https://openai.com.`,
-			want:    `see <a href="https://openai.com">https://openai.com</a>.`,
-		},
-		{
-			name:    "image",
-			content: `![alt](image.png "Image title")`,
-			want:    `<img src="image.png" alt="alt" title="Image title">`,
-		},
-		{
-			name:    "escape non tag html",
-			content: "2 < 3",
-			want:    "2 &lt; 3",
-		},
-		{
-			name:    "raw inline html",
-			content: "a <span>ok</span>",
-			want:    "a <span>ok</span>",
-		},
-		{
-			name:    "backslash escapes punctuation",
-			content: `\*literal\*`,
-			want:    "*literal*",
-		},
-		{
-			name:    "underscore inside word",
-			content: "foo_bar_baz",
-			want:    "foo_bar_baz",
-		},
-		{
-			name:    "do not parse inside inline code",
-			content: "`**bold**`",
-			want:    "<code>**bold**</code>",
-		},
-		{
-			name:    "unmatched marker",
-			content: "**bold",
-			want:    "**bold",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := renderInline(tt.content)
-			if got != tt.want {
-				t.Fatalf("renderInline(%q) = %q, want %q", tt.content, got, tt.want)
-			}
-		})
-	}
-}
-
-func TestRenderBlock(t *testing.T) {
-	tests := []struct {
-		name string
-		node BlockNode
-		want string
-	}{
-		{
-			name: "heading",
-			node: BlockNode{Kind: BlockHeading, Level: 2, Content: "SubTitle"},
-			want: "<h2>SubTitle</h2>",
-		},
-		{
-			name: "paragraph",
-			node: BlockNode{Kind: BlockParagraph, Content: "hello **world**"},
-			want: "<p>hello <strong>world</strong></p>",
-		},
-		{
-			name: "unordered list",
-			node: BlockNode{Kind: BlockUnorderedList, Items: []string{"a", "b"}},
-			want: "<ul><li>a</li><li>b</li></ul>",
-		},
-		{
-			name: "ordered list",
-			node: BlockNode{Kind: BlockOrderedList, Items: []string{"one", "two"}},
-			want: "<ol><li>one</li><li>two</li></ol>",
-		},
-		{
-			name: "blockquote",
-			node: BlockNode{Kind: BlockBlockquote, Children: []BlockNode{{Kind: BlockParagraph, Content: "quote\nsecond"}}},
-			want: "<blockquote><p>quote\nsecond</p></blockquote>",
-		},
-		{
-			name: "code block",
-			node: BlockNode{Kind: BlockCodeBlock, Content: "**not strong** <tag>", Language: "go"},
-			want: `<pre><code class="language-go">**not strong** &lt;tag&gt;</code></pre>`,
-		},
-		{
-			name: "mermaid code block",
-			node: BlockNode{Kind: BlockCodeBlock, Content: "graph TD\nA[<start>] --> B[end]", Language: "mermaid"},
-			want: `<div class="mermaid">graph TD
-A[&lt;start&gt;] --&gt; B[end]</div>`,
-		},
-		{
-			name: "horizontal rule",
-			node: BlockNode{Kind: BlockHorizontalRule},
-			want: "<hr>",
-		},
-		{
-			name: "table",
-			node: BlockNode{Kind: BlockTable, Headers: []string{"name", "age"}, Rows: [][]string{{"aron", "29"}}},
-			want: "<table><thead><tr><th>name</th><th>age</th></tr></thead><tbody><tr><td>aron</td><td>29</td></tr></tbody></table>",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := renderBlock(tt.node)
-			if got != tt.want {
-				t.Fatalf("renderBlock() = %q, want %q", got, tt.want)
-			}
-		})
-	}
-}
-
-func TestRenderHTML(t *testing.T) {
-	got := renderHTML([]BlockNode{
-		{Kind: BlockHeading, Level: 1, Content: "Title"},
-		{Kind: BlockParagraph, Content: "hello"},
-	})
-
-	for _, want := range []string{
-		"<!DOCTYPE html>",
-		`<meta charset="UTF-8">`,
-		`<meta name="viewport" content="width=device-width, initial-scale=1">`,
-		"<style>",
-		".ink-document",
-		".mermaid",
-		`<main class="ink-document">`,
-		"<h1>Title</h1>",
-		"<p>hello</p>",
-		"</main>",
-	} {
-		if !strings.Contains(got, want) {
-			t.Fatalf("renderHTML() does not contain %q: %q", want, got)
-		}
-	}
-
-	if strings.Contains(got, "mermaid.esm.min.mjs") {
-		t.Fatalf("renderHTML() included Mermaid script without Mermaid block: %q", got)
-	}
-}
-
-func TestRenderHTMLWithMermaid(t *testing.T) {
-	got := renderHTML([]BlockNode{
-		{Kind: BlockCodeBlock, Language: "mermaid", Content: "graph TD\nA --> B"},
-	})
-
-	for _, want := range []string{
-		`<div class="mermaid">graph TD
-A --&gt; B</div>`,
-		`https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs`,
-		"mermaid.initialize({ startOnLoad: true });",
-	} {
-		if !strings.Contains(got, want) {
-			t.Fatalf("renderHTML() does not contain %q: %q", want, got)
-		}
-	}
-}
-
-func TestRenderTestdataBasicMarkdown(t *testing.T) {
-	html := renderTestdataMarkdown(t, "basic.md")
-
-	for _, want := range []string{
-		"<h1>Basic Document</h1>",
-		`<a href="https://openai.com">OpenAI</a>`,
-		"<code>inline code</code>",
-		"<ul><li>first item</li><li>second item</li></ul>",
-		`<pre><code class="language-go">fmt.Println(&#34;hello&#34;)</code></pre>`,
-	} {
-		if !strings.Contains(html, want) {
-			t.Fatalf("basic.md rendered HTML does not contain %q: %q", want, html)
-		}
-	}
-}
-
-func TestRenderTestdataAdvancedMarkdown(t *testing.T) {
-	html := renderTestdataMarkdown(t, "advanced.md")
-
-	for _, want := range []string{
-		"<h1>Advanced Document</h1>",
-		"<blockquote><p>This is a quoted paragraph.\nIt spans two lines.</p></blockquote>",
-		"<table><thead><tr><th>name</th><th>role</th></tr></thead><tbody><tr><td>ink</td><td>previewer</td></tr></tbody></table>",
-		`<div class="note">`,
-		`<div class="mermaid">flowchart LR`,
-		"APIGW[&#34;API Gateway&#34;] --&gt; LambdaA[&#34;Lambda&#34;]",
-		`https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs`,
-	} {
-		if !strings.Contains(html, want) {
-			t.Fatalf("advanced.md rendered HTML does not contain %q: %q", want, html)
-		}
-	}
-}
-
-func TestBrokenMarkdownFallsBackWithoutError(t *testing.T) {
-	html := renderTestdataMarkdown(t, "broken.md")
-
-	for _, want := range []string{
-		"<h1>Broken Input</h1>",
-		"<p>This has **unclosed strong markup.</p>",
-		"<p>This link is broken: [OpenAI](https://openai.com</p>",
-		"<p>This image is broken: ![alt](image.png</p>",
-		"<p>| name | value |\n| not a separator |</p>",
-		"<p>&lt; 3 should not become raw HTML.</p>",
-		`<pre><code class="language-go">fmt.Println(&#34;still rendered as code&#34;)
-**not parsed**
-</code></pre>`,
-	} {
-		if !strings.Contains(html, want) {
-			t.Fatalf("broken.md rendered HTML does not contain %q: %q", want, html)
-		}
-	}
-}
-
-func TestParseMdToHTMLWritesTempHTML(t *testing.T) {
+func TestParseMdToHTMLWritesCacheHTML(t *testing.T) {
+	home := setupHome(t)
 	dir := t.TempDir()
 	mdPath := filepath.Join(dir, "input.md")
 	if err := os.WriteFile(mdPath, []byte("# Title\nhello"), 0644); err != nil {
@@ -415,10 +26,17 @@ func TestParseMdToHTMLWritesTempHTML(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parseMdToHTML() error = %v", err)
 	}
-	defer os.Remove(htmlPath)
 
 	if htmlPath == mdPath {
-		t.Fatalf("parseMdToHTML() returned markdown path, want temporary html path")
+		t.Fatalf("parseMdToHTML() returned markdown path, want cache html path")
+	}
+
+	wantDir := filepath.Join(home, ".ink", "cache", "pages")
+	if filepath.Dir(htmlPath) != wantDir {
+		t.Fatalf("parseMdToHTML() path dir = %q, want %q", filepath.Dir(htmlPath), wantDir)
+	}
+	if filepath.Ext(htmlPath) != ".html" {
+		t.Fatalf("parseMdToHTML() path = %q, want .html file", htmlPath)
 	}
 
 	body, err := os.ReadFile(htmlPath)
@@ -433,7 +51,69 @@ func TestParseMdToHTMLWritesTempHTML(t *testing.T) {
 	}
 }
 
+func TestParseMdToHTMLReusesSameCachePathForSameMarkdown(t *testing.T) {
+	setupHome(t)
+	dir := t.TempDir()
+	mdPath := filepath.Join(dir, "input.md")
+	if err := os.WriteFile(mdPath, []byte("# First"), 0644); err != nil {
+		t.Fatalf("write markdown fixture: %v", err)
+	}
+
+	firstPath, err := parseMdToHTML(mdPath)
+	if err != nil {
+		t.Fatalf("first parseMdToHTML() error = %v", err)
+	}
+
+	if err := os.WriteFile(mdPath, []byte("# Second"), 0644); err != nil {
+		t.Fatalf("rewrite markdown fixture: %v", err)
+	}
+	secondPath, err := parseMdToHTML(mdPath)
+	if err != nil {
+		t.Fatalf("second parseMdToHTML() error = %v", err)
+	}
+
+	if firstPath != secondPath {
+		t.Fatalf("parseMdToHTML() cache path changed: first %q, second %q", firstPath, secondPath)
+	}
+
+	body, err := os.ReadFile(secondPath)
+	if err != nil {
+		t.Fatalf("read generated html: %v", err)
+	}
+	if !strings.Contains(string(body), "<h1>Second</h1>") {
+		t.Fatalf("generated html = %q, want rewritten markdown content", string(body))
+	}
+}
+
+func TestParseMdToHTMLUsesDifferentCachePathForDifferentMarkdown(t *testing.T) {
+	setupHome(t)
+	dir := t.TempDir()
+	firstMD := filepath.Join(dir, "first.md")
+	secondMD := filepath.Join(dir, "second.md")
+	if err := os.WriteFile(firstMD, []byte("# First"), 0644); err != nil {
+		t.Fatalf("write first markdown fixture: %v", err)
+	}
+	if err := os.WriteFile(secondMD, []byte("# Second"), 0644); err != nil {
+		t.Fatalf("write second markdown fixture: %v", err)
+	}
+
+	firstPath, err := parseMdToHTML(firstMD)
+	if err != nil {
+		t.Fatalf("first parseMdToHTML() error = %v", err)
+	}
+	secondPath, err := parseMdToHTML(secondMD)
+	if err != nil {
+		t.Fatalf("second parseMdToHTML() error = %v", err)
+	}
+
+	if firstPath == secondPath {
+		t.Fatalf("parseMdToHTML() returned same cache path for different markdown files: %q", firstPath)
+	}
+}
+
 func TestParseMdToHTMLMissingFileReturnsError(t *testing.T) {
+	setupHome(t)
+
 	_, err := parseMdToHTML(filepath.Join(t.TempDir(), "missing.md"))
 	if err == nil {
 		t.Fatal("parseMdToHTML() error = nil, want error")
@@ -450,6 +130,110 @@ func TestViewWithoutFilenameReturnsError(t *testing.T) {
 	}
 	if err.Error() != "you need filename" {
 		t.Fatalf("View() error = %q, want %q", err.Error(), "you need filename")
+	}
+}
+
+func TestViewUsesConfiguredLibrary(t *testing.T) {
+	home := setupHome(t)
+	library := filepath.Join(home, "library")
+	if err := os.Mkdir(library, 0755); err != nil {
+		t.Fatalf("mkdir library: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(library, "note.md"), []byte("# Configured\n"), 0644); err != nil {
+		t.Fatalf("write markdown: %v", err)
+	}
+	if _, err := config.Set(config.KeyLibrary, library); err != nil {
+		t.Fatalf("set library: %v", err)
+	}
+
+	oldOpenFile := openFile
+	t.Cleanup(func() {
+		openFile = oldOpenFile
+	})
+
+	var opened string
+	openFile = func(path string) error {
+		opened = path
+		return nil
+	}
+
+	if err := viewMarkdown("note.md"); err != nil {
+		t.Fatalf("viewMarkdown() error = %v", err)
+	}
+	if opened == "" {
+		t.Fatal("viewMarkdown() did not open generated HTML")
+	}
+
+	body, err := os.ReadFile(opened)
+	if err != nil {
+		t.Fatalf("read generated html: %v", err)
+	}
+	if !strings.Contains(string(body), "<h1>Configured</h1>") {
+		t.Fatalf("generated html = %q, want configured markdown content", string(body))
+	}
+}
+
+func TestViewCleansOldPreviewCache(t *testing.T) {
+	home := setupHome(t)
+	library := filepath.Join(home, "library")
+	if err := os.Mkdir(library, 0755); err != nil {
+		t.Fatalf("mkdir library: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(library, "note.md"), []byte("# Current\n"), 0644); err != nil {
+		t.Fatalf("write markdown: %v", err)
+	}
+	if _, err := config.Set(config.KeyLibrary, library); err != nil {
+		t.Fatalf("set library: %v", err)
+	}
+
+	cacheDir := filepath.Join(home, ".ink", "cache", "pages")
+	if err := os.MkdirAll(cacheDir, 0755); err != nil {
+		t.Fatalf("mkdir cache: %v", err)
+	}
+	oldHTML := filepath.Join(cacheDir, "old.html")
+	newHTML := filepath.Join(cacheDir, "new.html")
+	oldText := filepath.Join(cacheDir, "old.txt")
+	nestedDir := filepath.Join(cacheDir, "nested.html")
+	for _, path := range []string{oldHTML, newHTML, oldText} {
+		if err := os.WriteFile(path, []byte(path), 0644); err != nil {
+			t.Fatalf("write cache file %s: %v", path, err)
+		}
+	}
+	if err := os.Mkdir(nestedDir, 0755); err != nil {
+		t.Fatalf("mkdir cache directory: %v", err)
+	}
+
+	now := time.Now()
+	oldTime := now.Add(-(previewCacheMaxAge + time.Hour))
+	newTime := now.Add(-time.Hour)
+	for _, path := range []string{oldHTML, oldText, nestedDir} {
+		if err := os.Chtimes(path, oldTime, oldTime); err != nil {
+			t.Fatalf("set old time %s: %v", path, err)
+		}
+	}
+	if err := os.Chtimes(newHTML, newTime, newTime); err != nil {
+		t.Fatalf("set new time: %v", err)
+	}
+
+	oldOpenFile := openFile
+	t.Cleanup(func() {
+		openFile = oldOpenFile
+	})
+	openFile = func(path string) error {
+		return nil
+	}
+
+	if err := viewMarkdown("note.md"); err != nil {
+		t.Fatalf("viewMarkdown() error = %v", err)
+	}
+
+	if _, err := os.Stat(oldHTML); !os.IsNotExist(err) {
+		t.Fatalf("old html still exists, err = %v", err)
+	}
+	for _, path := range []string{newHTML, oldText, nestedDir} {
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("cache path %s was removed or inaccessible: %v", path, err)
+		}
 	}
 }
 
@@ -477,6 +261,33 @@ func TestListFilesReturnsMarkdownFilesOnly(t *testing.T) {
 	}
 }
 
+func TestLsUsesConfiguredLibrary(t *testing.T) {
+	home := setupHome(t)
+	library := filepath.Join(home, "library")
+	if err := os.Mkdir(library, 0755); err != nil {
+		t.Fatalf("mkdir library: %v", err)
+	}
+	for _, name := range []string{"b.md", "a.md", "notes.txt"} {
+		if err := os.WriteFile(filepath.Join(library, name), []byte(name), 0644); err != nil {
+			t.Fatalf("write fixture %s: %v", name, err)
+		}
+	}
+	if _, err := config.Set(config.KeyLibrary, library); err != nil {
+		t.Fatalf("set library: %v", err)
+	}
+
+	var out bytes.Buffer
+	err := Ls(context.Background(), &cli.Command{Writer: &out})
+	if err != nil {
+		t.Fatalf("Ls() error = %v", err)
+	}
+
+	want := filepath.Join(library, "a.md") + "\n" + filepath.Join(library, "b.md") + "\n"
+	if out.String() != want {
+		t.Fatalf("Ls() output = %q, want %q", out.String(), want)
+	}
+}
+
 func TestListFilesMissingDirectoryReturnsError(t *testing.T) {
 	_, err := listFiles(filepath.Join(t.TempDir(), "missing"))
 	if err == nil {
@@ -487,21 +298,11 @@ func TestListFilesMissingDirectoryReturnsError(t *testing.T) {
 	}
 }
 
-func renderTestdataMarkdown(t *testing.T, name string) string {
+func setupHome(t *testing.T) string {
 	t.Helper()
 
-	raw, err := os.ReadFile(filepath.Join("testdata", name))
-	if err != nil {
-		t.Fatalf("read testdata %s: %v", name, err)
-	}
-
-	return renderHTML(parseBlocks(string(raw)))
-}
-
-func renderBlocks(nodes []BlockNode) string {
-	var b strings.Builder
-	for _, node := range nodes {
-		b.WriteString(renderBlock(node))
-	}
-	return b.String()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	return home
 }
