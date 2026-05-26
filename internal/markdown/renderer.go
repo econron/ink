@@ -34,6 +34,15 @@ func renderHTML(nodes []BlockNode) string {
 	return b.String()
 }
 
+func renderHTMLFragment(nodes []BlockNode) string {
+	var b strings.Builder
+	for _, node := range nodes {
+		b.WriteString(renderBlock(node))
+		b.WriteString("\n")
+	}
+	return b.String()
+}
+
 func hasMermaidBlock(nodes []BlockNode) bool {
 	for _, node := range nodes {
 		if node.Kind == BlockCodeBlock && isMermaidLanguage(node.Language) {

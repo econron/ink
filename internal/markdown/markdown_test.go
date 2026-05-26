@@ -330,6 +330,17 @@ func TestRenderHTML(t *testing.T) {
 	}
 }
 
+func TestToHTMLFragment(t *testing.T) {
+	got := ToHTMLFragment("# Title\n\nhello")
+	want := "<h1>Title</h1>\n<p>hello</p>\n"
+	if got != want {
+		t.Fatalf("ToHTMLFragment() = %q, want %q", got, want)
+	}
+	if strings.Contains(got, "<!DOCTYPE html>") || strings.Contains(got, "<main") {
+		t.Fatalf("ToHTMLFragment() returned full document HTML: %q", got)
+	}
+}
+
 func TestRenderHTMLWithMermaid(t *testing.T) {
 	got := renderHTML([]BlockNode{
 		{Kind: BlockCodeBlock, Language: "mermaid", Content: "graph TD\nA --> B"},

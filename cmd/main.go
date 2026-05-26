@@ -34,6 +34,12 @@ func newCommand() *cli.Command {
 				Action: commandAction(handler.View),
 			},
 			{
+				Name:      "edit",
+				Usage:     "edit markdown files in browser",
+				ArgsUsage: "[filename.md ...]",
+				Action:    commandAction(handler.Edit),
+			},
+			{
 				Name:  "config",
 				Usage: "manage ink config",
 				Commands: []*cli.Command{

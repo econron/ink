@@ -7,6 +7,8 @@ Markdown files in a local library can be listed and opened as styled HTML in a b
 ```sh
 ink ls
 ink view filename.md
+ink edit filename.md
+ink edit a.md b.md
 
 ink config set library ~/Downloads ~/Documents/notes
 ink config add library ~/work/docs
@@ -28,12 +30,22 @@ ink view filename.md
 ```
 
 `filename.md` is resolved relative to the configured `library` directory.
-If multiple libraries contain a file with the same name, `ink view` stops and prints recommended absolute-path commands. Run one of them to choose the file explicitly:
+If multiple libraries contain a file with the same name, `ink view` and `ink edit` stop and print recommended absolute-path commands. Run one of them to choose the file explicitly:
 
 ```sh
 ink view /Users/me/Downloads/filename.md
 ink view /Users/me/Documents/notes/filename.md
 ```
+
+Edit markdown files in the browser:
+
+```sh
+ink edit
+ink edit filename.md
+ink edit a.md b.md
+```
+
+`ink edit` starts one local editor server on `127.0.0.1` and opens a browser workspace. The file list shows `.md` files directly under the configured libraries. Click a file to open it in a tab, edit it, and press `Save` to write changes back to the original markdown file. Keep the command running while editing, and stop it with `Ctrl-C` when finished.
 
 Set the markdown library directory:
 
@@ -122,6 +134,8 @@ This creates an `ink` binary in the repository root. Run the local binary as:
 ./ink --help
 ./ink ls
 ./ink view filename.md
+./ink edit filename.md
+./ink edit a.md b.md
 ```
 
 Run tests:

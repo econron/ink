@@ -59,6 +59,10 @@ func viewMarkdown(mdName string) error {
 }
 
 func resolveMarkdownPath(mdName string) (string, error) {
+	return resolveMarkdownPathForCommand(mdName, "view")
+}
+
+func resolveMarkdownPathForCommand(mdName, commandName string) (string, error) {
 	if filepath.IsAbs(mdName) {
 		return filepath.Clean(mdName), nil
 	}
@@ -90,17 +94,19 @@ func resolveMarkdownPath(mdName string) (string, error) {
 	case 1:
 		return matches[0], nil
 	default:
-		return "", multipleMarkdownMatchesError(mdName, matches)
+		return "", multipleMarkdownMatchesError(commandName, mdName, matches)
 	}
 }
 
-func multipleMarkdownMatchesError(mdName string, matches []string) error {
+func multipleMarkdownMatchesError(commandName, mdName string, matches []string) error {
 	var b strings.Builder
 	b.WriteString("multiple files matched ")
 	b.WriteString(strconv.Quote(mdName))
 	b.WriteString("; run one of:")
 	for _, match := range matches {
-		b.WriteString("\nink view ")
+		b.WriteString("\nink ")
+		b.WriteString(commandName)
+		b.WriteString(" ")
 		b.WriteString(match)
 	}
 	return errors.New(b.String())

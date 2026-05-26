@@ -22,6 +22,10 @@ func ToHTML(markdown string) string {
 	return renderHTML(parseBlocks(markdown))
 }
 
+func ToHTMLFragment(markdown string) string {
+	return renderHTMLFragment(parseBlocks(markdown))
+}
+
 func parseBlocksFromLines(lines []string) []BlockNode {
 	p := parser{lines: lines}
 	return p.parseRange(0, len(lines))
