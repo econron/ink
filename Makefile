@@ -17,3 +17,4 @@ view:
 
 nofile:
 	./ink view
+

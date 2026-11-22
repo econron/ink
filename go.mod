@@ -1,6 +1,6 @@
 module ink
 
-go 1.26.4
+go 1.27.4
 
 require (
 	github.com/econron/browser v0.0.0-20260523051341-e2efe1d95904
